@@ -28,6 +28,8 @@ public class AppFlowTest {
     }
     static void installationFixture(File stage, String content) throws IOException {
         byte[] nso = new byte[0x100]; nso[0] = 'N'; nso[1] = 'S'; nso[2] = 'O'; nso[3] = '0';
+        byte[] build = hex("C433D980688380A642C086072F620928");
+        System.arraycopy(build, 0, nso, 0x40, build.length);
         bytes(new File(stage, "exefs/main"), nso); bytes(new File(stage, "exefs/sdk"), nso);
         text(new File(stage, "extract/romfs/CPK/data.cpk"), content);
         text(new File(stage, "analysis/main.bin"), "flat");
@@ -35,6 +37,11 @@ public class AppFlowTest {
         text(new File(stage, ".import/complete"), "checked import\n");
         text(new File(stage, ".import/index.tsv"), "exefs\t4\t00000000\tanalysis/main.bin\nromfs\t" +
                 content.getBytes("UTF-8").length + "\t00000000\textract/romfs/CPK/data.cpk\n");
+    }
+    static byte[] hex(String value) {
+        byte[] out = new byte[value.length() / 2];
+        for (int i = 0; i < out.length; i++) out[i] = (byte)Integer.parseInt(value.substring(i * 2, i * 2 + 2), 16);
+        return out;
     }
     static void installedGameTests(File parent) throws Exception {
         File root = new File(parent, "installed-game-test"); root.mkdirs();
