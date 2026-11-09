@@ -21,7 +21,8 @@ import java.io.IOException;
 /** Preparation only: completion returns directly to the launcher. */
 public class ImportActivity extends Activity {
     private static final java.util.concurrent.atomic.AtomicBoolean ACTIVE = new java.util.concurrent.atomic.AtomicBoolean();
-    static final String EXTRA_URI = "uri", EXTRA_NAME = "name";
+    static final String EXTRA_URI = "uri", EXTRA_NAME = "name", EXTRA_UPDATE_URI = "update_uri",
+            EXTRA_UPDATE_NAME = "update_name";
     TextView status;
     ProgressBar bar;
     volatile boolean running;
@@ -101,9 +102,12 @@ public class ImportActivity extends Activity {
         }
 
         final Uri uri = Uri.parse(uriString);
+        final String updateUriString = getIntent().getStringExtra(EXTRA_UPDATE_URI);
+        final Uri updateUri = updateUriString == null || updateUriString.isEmpty() ? null : Uri.parse(updateUriString);
 
         final String name =
             getIntent().getStringExtra(EXTRA_NAME);
+        final String updateName = getIntent().getStringExtra(EXTRA_UPDATE_NAME);
 
         final File keys =
             Launcher.keysFile(this, "prod.keys");
@@ -126,7 +130,9 @@ public class ImportActivity extends Activity {
         Importer.reset();
 
 
-        status.setText("Installing game data... Keep this screen open and allow enough free space for the extracted game. The NSP/XCI will not be needed after installation succeeds.");
+        status.setText(updateUri == null
+                ? "Installing base game data... Keep this screen open and allow enough free space."
+                : "Applying the game update over the base game... Keep this screen open and allow enough free space.");
 
         new Thread(new Runnable() {
             @Override
@@ -138,7 +144,9 @@ public class ImportActivity extends Activity {
                 try (
                     ParcelFileDescriptor pfd =
                         getContentResolver()
-                            .openFileDescriptor(uri, "r")
+                            .openFileDescriptor(uri, "r");
+                    ParcelFileDescriptor updatePfd = updateUri == null ? null :
+                        getContentResolver().openFileDescriptor(updateUri, "r")
                 ) {
                     if (pfd == null) {
                         throw new IOException(
@@ -156,6 +164,8 @@ public class ImportActivity extends Activity {
                     rc = Importer.run(
                         pfd.getFd(),
                         name == null ? "" : name,
+                        updatePfd == null ? -1 : updatePfd.getFd(),
+                        updateName == null ? "" : updateName,
                         keys.getPath(),
                         titleKeys.exists()
                             ? titleKeys.getPath()
@@ -204,8 +214,9 @@ public class ImportActivity extends Activity {
                         if (cancelRequested) { setResult(RESULT_CANCELED); finish(); return; }
                         if (result == 0) {
                             bar.setProgress(1000);
-                            status.setText("Game installed. The NSP/XCI is no longer required to play.");
-                            Toast.makeText(ImportActivity.this, "Game installed. The NSP/XCI is no longer required to play.", Toast.LENGTH_LONG).show();
+                            String complete = updateUri == null ? "Game installed." : "Game update installed.";
+                            status.setText(complete + " The NSP/XCI files are no longer required to play.");
+                            Toast.makeText(ImportActivity.this, complete, Toast.LENGTH_LONG).show();
                             setResult(RESULT_OK);
                             finish();
                         } else {
