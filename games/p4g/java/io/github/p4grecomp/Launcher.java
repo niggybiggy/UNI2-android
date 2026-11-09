@@ -69,7 +69,8 @@ public class Launcher extends Activity {
     final Map<String, String> config = new LinkedHashMap<>();
     TextView status;
     Button play;
-    static final int PICK_ZIP = 1, PICK_FOLDER = 2, PICK_GAME = 3, PICK_KEYS = 4, PREPARE = 6, PICK_CPK = 7, PICK_DRIVER = 8;
+    static final int PICK_ZIP = 1, PICK_FOLDER = 2, PICK_GAME = 3, PICK_KEYS = 4, PREPARE = 6, PICK_CPK = 7,
+            PICK_DRIVER = 8, PICK_UPDATE = 9;
 
     String t(String spanish, String english) { return Lang.t(spanish, english); }
 
@@ -104,12 +105,25 @@ public class Launcher extends Activity {
 
     String gameName() { return prefs().getString("name", ""); }
 
+    String updateUri() { return prefs().getString("update_uri", null); }
+
+    String updateName() { return prefs().getString("update_name", ""); }
+
     static File keysFile(Context c, String name) { return new File(new File(c.getFilesDir(), "keys"), name); }
 
     boolean hasKeys() { return keysFile(this, "prod.keys").length() > 0; }
 
     boolean gameReadable() {
         try (ParcelFileDescriptor f = getContentResolver().openFileDescriptor(Uri.parse(gameUri()), "r")) {
+            return f != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    boolean updateReadable() {
+        if (updateUri() == null) return true;
+        try (ParcelFileDescriptor f = getContentResolver().openFileDescriptor(Uri.parse(updateUri()), "r")) {
             return f != null;
         } catch (Exception e) {
             return false;
@@ -156,6 +170,22 @@ public class Launcher extends Activity {
                 .remove("p4g_prepared_uri").apply();
     }
 
+    void onUpdatePicked(Uri uri) {
+        String name = displayName(uri);
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (!lower.endsWith(".nsp")) {
+            tell(t("Archivo no válido", "Not an update file"),
+                    t("Elige la actualización de P4G en formato .nsp.",
+                            "Choose the P4G update in .nsp format."));
+            return;
+        }
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
+        prefs().edit().putString("update_uri", uri.toString()).putString("update_name", name).apply();
+    }
+
     // prod.keys (and title.keys, when the dump needs it): copied into the app's own storage, never shared or logged.
     void onKeysPicked(Intent data) {
         List<Uri> uris = new ArrayList<>();
@@ -192,6 +222,8 @@ public class Launcher extends Activity {
         Intent i = new Intent(this, ImportActivity.class);
         i.putExtra(ImportActivity.EXTRA_URI, gameUri());
         i.putExtra(ImportActivity.EXTRA_NAME, gameName());
+        i.putExtra(ImportActivity.EXTRA_UPDATE_URI, updateUri());
+        i.putExtra(ImportActivity.EXTRA_UPDATE_NAME, updateName());
         startActivityForResult(i, PREPARE);
     }
 
@@ -363,6 +395,8 @@ public class Launcher extends Activity {
                         pick(PICK_GAME, "*/*", false);
                     }
                 });
+        addRow(root, t("Actualización de P4G .nsp (opcional)", "P4G update .nsp (optional)"),
+                updateUri() == null ? t("Elegir", "Choose") : updateName(), v -> pick(PICK_UPDATE, "*/*", false));
         addRow(root, t("Claves (prod.keys)", "Keys (prod.keys)"), t("Elegir", "Choose"), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -395,6 +429,17 @@ public class Launcher extends Activity {
                 t("Visibilidad y posición de botones", "Button visibility and layout"));
         LinearLayout files = settingsGroup(root, "files", t("Partidas y mods", "Saves & mods"),
                 t("Copias de seguridad y traducciones", "Backups, translations and mod manager"));
+        addRow(files, t("Juego base para actualizar", "Base game for update"), t("Elegir", "Choose"),
+                v -> pick(PICK_GAME, "*/*", false));
+        addRow(files, t("Actualización de P4G (.nsp)", "P4G update (.nsp)"),
+                updateUri() == null ? t("Elegir", "Choose") : updateName(), v -> pick(PICK_UPDATE, "*/*", false));
+        addRow(files, t("Aplicar actualización / reinstalar", "Apply update / reinstall"), t("Preparar", "Prepare"), v -> {
+            if (!hasAccess()) askAccess();
+            else if (gameUri() == null || !gameReadable()) pick(PICK_GAME, "*/*", false);
+            else if (updateUri() == null || !updateReadable()) pick(PICK_UPDATE, "*/*", false);
+            else if (!hasKeys()) pick(PICK_KEYS, "*/*", true);
+            else prepare();
+        });
         LinearLayout diagnostics = settingsGroup(root, "diagnostics", t("Diagnóstico", "Diagnostics"),
                 t("Exportar registros para reportar errores", "Export logs for bug reports"));
         TextView diagnosticHelp = new TextView(this);
@@ -633,7 +678,10 @@ public class Launcher extends Activity {
                 updateButtons(getWindow().getDecorView());
                 play.setEnabled(true);
                 if (ready) {
-                    status.setText("Game installed — NSP/XCI not required.\nNew effects may briefly pause while their shaders are prepared.");
+                    String revision;
+                    try { revision = InstalledGameFiles.revision(InstalledGameFiles.game(installationDir(this))); }
+                    catch (Exception e) { revision = "unknown"; }
+                    status.setText("Game " + revision + " installed — NSP/XCI not required.\nNew effects may briefly pause while their shaders are prepared.");
                     play.setText(t("Jugar", "Play"));
                 } else {
                     String game = gameUri() == null ? "No game selected" : gameName();
@@ -724,6 +772,11 @@ public class Launcher extends Activity {
         if (data.getData() == null) return;
         if (request == PICK_GAME) {
             onGamePicked(data.getData());
+            refresh();
+            return;
+        }
+        if (request == PICK_UPDATE) {
+            onUpdatePicked(data.getData());
             refresh();
             return;
         }
