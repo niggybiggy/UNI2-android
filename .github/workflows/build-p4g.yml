@@ -96,13 +96,35 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Restore cached Maxwell translator
+        id: maxwell-cache
+        uses: actions/cache@v4
+        with:
+          path: build-apk/shader-libs
+          key: maxwell-translator-v1-${{ runner.os }}-${{ hashFiles('tools/maxwell/**') }}
+
       - name: Build Maxwell translator from source
+        if: steps.maxwell-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 20
         shell: bash
         run: |
           set -euo pipefail
+          echo "::group::Install Maxwell build dependencies"
           sudo apt-get update -qq
           sudo apt-get install -y -qq patch zlib1g-dev spirv-tools
+          echo "::endgroup::"
+          echo "Starting the Maxwell translator build at $(date -u +%FT%TZ)"
           ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" bash tools/maxwell/build_p4g_translator.sh
+          echo "Finished the Maxwell translator build at $(date -u +%FT%TZ)"
+
+      - name: Verify Maxwell translator output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build-apk/shader-libs/libspirvharness.so
+          test -s build-apk/shader-libs/libc++_shared.so
+          test -s build-apk/shader-libs/Ryubing-MIT.txt
+          echo "Maxwell translator ready ($(du -h build-apk/shader-libs/libspirvharness.so | cut -f1))."
 
       - name: Configure P4G ARM64
         shell: bash
@@ -496,16 +518,3 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: P4G-0.4.4-Beta
-          path: build-apk/P4G.apk
-          if-no-files-found: error
-
-      - name: Upload shader packaging diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: p4g-apk-shader-diagnostics
-          path: |
-            build-apk/shader-libs/shader-elf.txt
-            build-apk/shader-libs/shader-symbols.txt
-            build-apk/shader-libs/shader-dependencies.txt
-          if-no-files-found: warn
