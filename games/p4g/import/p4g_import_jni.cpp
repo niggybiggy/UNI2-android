@@ -38,8 +38,8 @@ struct OwnedFd {
     int value;
     ~OwnedFd() { if (value >= 0) close(value); }
 };
-int run(int fd, const std::string& name, const std::string& keys, const std::string& title_keys,
-        const std::string& data_dir) {
+int run(int fd, const std::string& name, int update_fd, const std::string& update_name,
+        const std::string& keys, const std::string& title_keys, const std::string& data_dir) {
     std::unique_lock guard(run_lock, std::try_to_lock);
     if (!guard.owns_lock()) return 1;
     phase = 1; done = 0; total = 0; set_message("");
@@ -52,6 +52,7 @@ int run(int fd, const std::string& name, const std::string& keys, const std::str
         if (!root.is_absolute() || root == root.root_path() || root.lexically_normal() != root)
             return fail("Invalid data directory");
         std::vector<nxi::InputFile> inputs{{name, fd}};
+        if (update_fd >= 0) inputs.push_back({update_name, update_fd});
         OwnedFd k{open(keys.c_str(), O_RDONLY | O_CLOEXEC)};
         if (k.value < 0) return fail("prod.keys not found");
         inputs.push_back({"prod.keys", k.value});
@@ -97,12 +98,25 @@ int run(int fd, const std::string& name, const std::string& keys, const std::str
         if (!write(staging / "results.tsv", "hash\tresources\n")) throw std::runtime_error("Cannot write resource table");
         std::set<std::string> hashes;
         phase = 2;
-        total = int(game->exefs().size()); done = 0;
-        for (const auto& [module, nso] : game->exefs()) {
+        std::vector<fs::path> modules;
+        for (const auto& entry : fs::directory_iterator(root / "exefs"))
+            if (entry.is_regular_file()) modules.push_back(entry.path());
+        std::sort(modules.begin(), modules.end());
+        total = int(modules.size()); done = 0;
+        for (const fs::path& module_path : modules) {
             check_cancel();
+            std::ifstream input(module_path, std::ios::binary | std::ios::ate);
+            if (!input) throw std::runtime_error("Cannot read extracted module " + module_path.filename().string());
+            std::streamsize size = input.tellg();
+            if (size < 0 || uint64_t(size) > (1ull << 31)) throw std::runtime_error("Invalid extracted module size");
+            std::vector<uint8_t> nso(static_cast<size_t>(size));
+            input.seekg(0);
+            if (size && !input.read(reinterpret_cast<char*>(nso.data()), size))
+                throw std::runtime_error("Cannot read extracted module " + module_path.filename().string());
             if (nso.size() < 4 || std::memcmp(nso.data(), "NSO0", 4)) { ++done; continue; }
             std::vector<uint8_t> flat;
-            if (!nxi::nso_to_flat_image(nso, flat, error)) throw std::runtime_error("Invalid " + module + ": " + error);
+            if (!nxi::nso_to_flat_image(nso, flat, error))
+                throw std::runtime_error("Invalid " + module_path.filename().string() + ": " + error);
             auto blocks = p4g::maxwell_blocks(flat);
             phase = 3;
             for (const auto& block : blocks) {
@@ -158,8 +172,9 @@ JNIEXPORT jlongArray JNICALL Java_io_github_p4grecomp_Importer_bytes(JNIEnv* env
     return out;
 }
 JNIEXPORT jint JNICALL Java_io_github_p4grecomp_Importer_run(JNIEnv* env, jclass, jint fd, jstring name,
-        jstring keys, jstring title_keys, jstring data_dir, jstring, jint) {
-    return run(fd, jstr(env, name), jstr(env, keys), jstr(env, title_keys), jstr(env, data_dir));
+        jint update_fd, jstring update_name, jstring keys, jstring title_keys, jstring data_dir, jstring, jint) {
+    return run(fd, jstr(env, name), update_fd, jstr(env, update_name), jstr(env, keys),
+            jstr(env, title_keys), jstr(env, data_dir));
 }
 JNIEXPORT jintArray JNICALL Java_io_github_p4grecomp_Importer_progress(JNIEnv* env, jclass) {
     jint values[] = {phase.load(), done.load(), total.load()};
