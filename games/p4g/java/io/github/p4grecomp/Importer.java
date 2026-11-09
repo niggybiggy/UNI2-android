@@ -12,6 +12,8 @@ final class Importer {
     static native int run(
         int nspFd,
         String nspName,
+        int updateFd,
+        String updateName,
         String keysPath,
         String titleKeysPath,
         String dataDir,
