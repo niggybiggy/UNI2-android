@@ -628,11 +628,14 @@ VkPipeline graphics_pipeline(const PipelineKey& key, const ProgramLayout& layout
 void pipeline_warm_step() {
     adopt_finished();
     g_prewarm_inflight = g_inflight.size();
-    static const bool on = [] {
+    // 0: disabled; 1: bounded background work; 2: compile every currently available learned pipeline and wait.
+    // Aggressive mode cannot invent first-run keys: it only front-loads pipelines recorded by earlier sessions.
+    static const int mode = [] {
         const char* e = std::getenv("NX_PIPE_PREWARM");
-        return !(e && e[0] == '0') && pool().threads > 0;
+        if (pool().threads == 0 || (e && e[0] == '0')) return 0;
+        return e && e[0] == '2' ? 2 : 1;
     }();
-    if (!on) return;
+    if (!mode) return;
     static size_t cursor = 0;
     static bool loaded = false;
     static std::vector<WarmRec> recs;
@@ -665,8 +668,12 @@ void pipeline_warm_step() {
         return size_t(std::clamp(n, 1L, 1024L));
     }();
     const uint64_t t0 = plat::monotonic_ns();
-    for (size_t scanned = 0; scanned < std::min(recs.size(), scan_limit) && g_prewarm_inflight < inflight_limit; scanned++) {
-        if (plat::monotonic_ns() - t0 > budget_ns) break;
+    const size_t step_scan_limit = mode == 2 ? recs.size() : std::min(recs.size(), scan_limit);
+    // Bound each blocking batch so a large learned cache does not allocate every VkGraphicsPipelineCreateInfo at once.
+    const size_t step_inflight_limit = mode == 2 ? std::max<size_t>(inflight_limit, 256) : inflight_limit;
+    std::vector<std::shared_ptr<PipeTask>> aggressive_tasks;
+    for (size_t scanned = 0; scanned < step_scan_limit && g_prewarm_inflight < step_inflight_limit; scanned++) {
+        if (mode == 1 && plat::monotonic_ns() - t0 > budget_ns) break;
         size_t i = cursor++ % recs.size();
         if (done[i]) continue;
         WarmRec& r = recs[i];
@@ -684,8 +691,14 @@ void pipeline_warm_step() {
         t->build = prepare_graphics_pipeline(key, program_layout(stages));
         g_inflight.emplace(ck, t);
         enqueue(t);
+        if (mode == 2) aggressive_tasks.push_back(t);
         g_prewarm_inflight++;
         note_pipeline_prewarmed();
+    }
+    if (mode == 2 && !aggressive_tasks.empty()) {
+        log("nvn/vk: aggressive prewarm: waiting for %zu known pipelines", aggressive_tasks.size());
+        for (const auto& task : aggressive_tasks) task->wait();
+        adopt_finished();
     }
     // Count the ones that finished (adopt_finished erased them from g_inflight): recompute the in-flight count.
     g_prewarm_inflight = g_inflight.size();
