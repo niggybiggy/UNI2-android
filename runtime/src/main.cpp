@@ -219,41 +219,22 @@ void boot() {
     if (nso.size() < 2) fatal("failed to load base modules (main and sdk required)");
 
     
-    // Persona 4 Golden - Nintendo Switch
-    // Validacao do Build ID do executavel principal.
-
+    // Refuse unknown executable revisions before applying any game-specific assumptions. P4G's
+    // 1.0.1 and 1.0.2 updates share the registered main Build ID prefix.
     {
         std::string have;
-
         for (uint8_t b : nso[0]->build_id) {
             char hex[3];
-
-            std::snprintf(
-                hex,
-                sizeof(hex),
-                "%02X",
-                b
-            );
-
+            std::snprintf(hex, sizeof(hex), "%02X", b);
             have += hex;
         }
-
-        static constexpr const char* P4G_BUILD_ID =
-            "C433D980688380A642C086072F620928DF7D6320000000000000000000000000";
-
-        if (have == P4G_BUILD_ID) {
-            log(
-                "p4g: main build %s recognized",
-                have.c_str()
-            );
-        } else {
-            fatal(
-                "P4G: Build ID nao suportado: %s. "
-                "Esperado: %s",
-                have.c_str(),
-                P4G_BUILD_ID
-            );
-        }
+        const bool configured = game::kInfo.main_build_id &&
+                have.rfind(game::kInfo.main_build_id, 0) == 0;
+        const bool p4g_update = std::strcmp(game::kInfo.id, "p4g") == 0 &&
+                have.rfind("66B2B6D53549A6364A43F69E282E3882", 0) == 0;
+        if (!configured && !p4g_update)
+            fatal("%s: unsupported main Build ID %s", game::kInfo.title, have.c_str());
+        log("%s: main build %s recognized", game::kInfo.id, have.c_str());
     }
 
 
