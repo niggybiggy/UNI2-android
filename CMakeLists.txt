@@ -36,6 +36,10 @@ endif()
 option(NX_TESTS "Build the standalone unit tests" OFF)
 # The public build: no log file and no file-triggered diagnostics (runtime/src/platform.h kDiagnostics).
 option(NX_RELEASE "Public build: no nx.log file, no file-triggered diagnostics" OFF)
+# Keep link-time optimization opt-in: it is useful for public Android builds, while diagnostic builds retain
+# quicker links and ordinary object files for profiling. ThinLTO lets Clang optimize across runtime translation
+# units without the peak memory cost of full LTO.
+option(NX_ANDROID_THIN_LTO "Enable ThinLTO for Android Release native libraries" OFF)
 if(NX_TESTS AND NOT ANDROID)
     enable_testing()
     add_executable(gpu_pick_test tests/gpu_pick_test.cpp runtime/src/nvn/nvn_gpu_pick.cpp)
@@ -313,4 +317,21 @@ if(ANDROID AND NX_GAME STREQUAL "p4g")
     target_link_options(p4gimport PRIVATE
         -Wl,-z,max-page-size=16384
     )
+endif()
+
+if(NX_ANDROID_THIN_LTO)
+    if(NOT ANDROID)
+        message(FATAL_ERROR "NX_ANDROID_THIN_LTO is supported only for Android builds")
+    endif()
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "NX_ANDROID_THIN_LTO requires Clang")
+    endif()
+
+    foreach(target IN ITEMS ${NX_GAME} p4gimport)
+        if(TARGET ${target})
+            target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:-flto=thin>)
+            target_link_options(${target} PRIVATE $<$<CONFIG:Release>:-flto=thin>)
+        endif()
+    endforeach()
+    message(STATUS "Android Release ThinLTO enabled for native P4G targets")
 endif()
