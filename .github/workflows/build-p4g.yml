@@ -121,9 +121,13 @@ jobs:
             -DANDROID_STL=c++_shared \
             -DNX_VULKAN_SDK="$GITHUB_WORKSPACE/vulkan-headers" \
             -DNX_GAME=p4g \
-            -DNX_NCE=ON
+            -DNX_NCE=ON \
+            -DNX_ANDROID_THIN_LTO=ON
 
           echo "P4G ARM64 configuration ready."
+
+          grep -q -- "-flto=thin" build-p4g/build.ninja
+          echo "P4G ThinLTO flags verified."
 
       - name: Build P4G native library
         shell: bash
