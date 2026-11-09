@@ -48,7 +48,7 @@ The runtime accepts the base game (1.0.0, Build ID `C433D980688380A6`) and the o
 3. Grant the requested file access permission.
 4. Select the base game's **NSP/XCI** file, your **prod.keys** file and, optionally, the official update **NSP**.
 5. Tap **Prepare** and wait for preparation to finish. When an update is selected, its ExeFS and patched RomFS are installed atomically over the base dump.
-6. To update an existing installation later, open **Saves & mods**, choose the base game and update NSP, then tap **Apply update / reinstall**. A failed or cancelled preparation keeps the previous installation playable.
+6. To update an existing installation later, open the separate **Game update** section, choose the original base game and update NSP, then tap **Apply update**. The launcher explains why the original container is needed again; a failed or cancelled preparation keeps the previous installation playable.
 6. A **Preparation complete** message appears, and the app returns to the main menu automatically.
 7. Adjust your settings and tap **Play**.
 
