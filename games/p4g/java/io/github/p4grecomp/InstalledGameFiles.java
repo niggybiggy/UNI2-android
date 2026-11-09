@@ -120,6 +120,25 @@ final class InstalledGameFiles {
         try (DataInputStream in = new DataInputStream(new FileInputStream(file))) { return in.readInt() == 0x4e534f30; }
     }
 
+    static String buildId(File file) throws IOException {
+        if (!nso(file)) throw new IOException("The installed main executable is not a valid NSO");
+        byte[] id = new byte[16];
+        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+            in.seek(0x40);
+            in.readFully(id);
+        }
+        StringBuilder out = new StringBuilder(32);
+        for (byte value : id) out.append(String.format(Locale.ROOT, "%02X", value & 0xff));
+        return out.toString();
+    }
+
+    static String revision(File current) throws IOException {
+        String id = buildId(new File(current, "exefs/main"));
+        if (id.equals("C433D980688380A642C086072F620928")) return "1.0.0";
+        if (id.equals("66B2B6D53549A6364A43F69E282E3882")) return "1.0.1 / 1.0.2";
+        throw new IOException("Unsupported P4G revision (Build ID " + id + ")");
+    }
+
     /** Small launch check; the full file list is checked off the UI thread by ready(). */
     static boolean present(File root) {
         File current = game(root);
@@ -192,6 +211,7 @@ final class InstalledGameFiles {
         if (new File(stage, ".import/complete").length() == 0 ||
                 !nso(new File(stage, "exefs/main")) || !nso(new File(stage, "exefs/sdk")) ||
                 !PreparationFiles.ready(new File(stage, "spirv"))) throw new IOException("Game extraction or shader preparation is incomplete");
+        revision(stage);
         SortedMap<String, Long> files = new TreeMap<>();
         int romfs = 0;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(
