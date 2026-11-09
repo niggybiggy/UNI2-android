@@ -39,15 +39,16 @@ A full playthrough and broad device compatibility have **not** been verified. Pe
 
 Minimum RAM and GPU performance requirements have not been established across devices. An ARM64 processor and Vulkan support alone do not guarantee compatibility.
 
-The current runtime targets the base game with Title ID `010062B01525C000` and build ID prefix `C433D980688380A6`. Other game revisions and updates are not guaranteed to work.
+The runtime accepts the base game (1.0.0, Build ID `C433D980688380A6`) and the official 1.0.1/1.0.2 update executable (Build ID `66B2B6D53549A636`). Unknown revisions are rejected before launch.
 
 ## Installation and first launch
 
 1. Download **P4G.apk** from a published release or a completed GitHub Actions build.
 2. Install the APK and open **P4G**.
 3. Grant the requested file access permission.
-4. Select the base game's **NSP/XCI** file and your **prod.keys** file.
-5. Tap **Prepare** and wait for preparation to finish.
+4. Select the base game's **NSP/XCI** file, your **prod.keys** file and, optionally, the official update **NSP**.
+5. Tap **Prepare** and wait for preparation to finish. When an update is selected, its ExeFS and patched RomFS are installed atomically over the base dump.
+6. To update an existing installation later, open **Saves & mods**, choose the base game and update NSP, then tap **Apply update / reinstall**. A failed or cancelled preparation keeps the previous installation playable.
 6. A **Preparation complete** message appears, and the app returns to the main menu automatically.
 7. Adjust your settings and tap **Play**.
 
