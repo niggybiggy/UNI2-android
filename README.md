@@ -69,7 +69,7 @@ Back up your saves before updating. If Android rejects the update, check that bo
 | Fullscreen (stretch) | Fill the screen when enabled; preserve the game image's aspect ratio when disabled. |
 | FPS limit | Choose 30 FPS, 45 FPS or the option labeled 60 FPS. |
 | FPS counter | Show or hide the frame-rate counter. |
-| Pipeline prewarming (experimental) | On by default. Prepare previously seen graphics pipelines in advance to reduce first-use shader stutters; turn it Off if it causes problems on a device. |
+| Pipeline prewarming (experimental) | Background is the default. Aggressive waits for every currently available pipeline learned in earlier sessions, trading longer loading for fewer later first-use stalls. Off disables prewarming. First-run pipelines cannot be predicted. |
 | On-screen controls | Show or hide the touch controls. |
 | Button size | Adjust touch button size. |
 | Button opacity | Adjust touch button opacity. |
