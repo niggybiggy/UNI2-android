@@ -518,3 +518,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: P4G-0.4.4-Beta
+          path: build-apk/P4G.apk
+          if-no-files-found: error
+
+      - name: Upload shader packaging diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4g-apk-shader-diagnostics
+          path: |
+            build-apk/shader-libs/shader-elf.txt
+            build-apk/shader-libs/shader-symbols.txt
+            build-apk/shader-libs/shader-dependencies.txt
+          if-no-files-found: warn
