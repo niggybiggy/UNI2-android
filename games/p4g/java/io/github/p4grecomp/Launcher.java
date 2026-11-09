@@ -427,19 +427,29 @@ public class Launcher extends Activity {
                 t("Resolución, FPS y driver", "Resolution, FPS and GPU driver"));
         LinearLayout controls = settingsGroup(root, "controls", t("Controles", "Controls"),
                 t("Visibilidad y posición de botones", "Button visibility and layout"));
-        LinearLayout files = settingsGroup(root, "files", t("Partidas y mods", "Saves & mods"),
-                t("Copias de seguridad y traducciones", "Backups, translations and mod manager"));
-        addRow(files, t("Juego base para actualizar", "Base game for update"), t("Elegir", "Choose"),
-                v -> pick(PICK_GAME, "*/*", false));
-        addRow(files, t("Actualización de P4G (.nsp)", "P4G update (.nsp)"),
+        LinearLayout gameUpdate = settingsGroup(root, "game_update", t("Actualización del juego", "Game update"),
+                t("Aplicar un update oficial .nsp", "Apply an official update .nsp"));
+        TextView updateHelp = new TextView(this);
+        updateHelp.setText(t(
+                "Para aplicar el update, selecciona otra vez el NSP/XCI original y el update NSP. El update de Switch depende de los bloques del juego base y no puede usar solamente los archivos ya extraídos. Después de preparar, ninguno de los NSP será necesario para jugar.",
+                "To apply an update, select the original NSP/XCI again and the update NSP. A Switch update depends on blocks from the base game and cannot use only the already extracted files. Neither NSP is needed to play after preparation finishes."));
+        updateHelp.setTextColor(Color.LTGRAY);
+        updateHelp.setTextSize(14);
+        updateHelp.setPadding(0, dp(4), 0, dp(8));
+        gameUpdate.addView(updateHelp);
+        addRow(gameUpdate, t("Juego base original (NSP/XCI)", "Original base game (NSP/XCI)"),
+                gameUri() == null ? t("Elegir", "Choose") : gameName(), v -> pick(PICK_GAME, "*/*", false));
+        addRow(gameUpdate, t("Archivo del update (.nsp)", "Update file (.nsp)"),
                 updateUri() == null ? t("Elegir", "Choose") : updateName(), v -> pick(PICK_UPDATE, "*/*", false));
-        addRow(files, t("Aplicar actualización / reinstalar", "Apply update / reinstall"), t("Preparar", "Prepare"), v -> {
+        addRow(gameUpdate, t("Aplicar update", "Apply update"), t("Preparar", "Prepare"), v -> {
             if (!hasAccess()) askAccess();
             else if (gameUri() == null || !gameReadable()) pick(PICK_GAME, "*/*", false);
             else if (updateUri() == null || !updateReadable()) pick(PICK_UPDATE, "*/*", false);
             else if (!hasKeys()) pick(PICK_KEYS, "*/*", true);
             else prepare();
         });
+        LinearLayout files = settingsGroup(root, "files", t("Partidas y mods", "Saves & mods"),
+                t("Copias de seguridad y traducciones", "Backups, translations and mod manager"));
         LinearLayout diagnostics = settingsGroup(root, "diagnostics", t("Diagnóstico", "Diagnostics"),
                 t("Exportar registros para reportar errores", "Export logs for bug reports"));
         TextView diagnosticHelp = new TextView(this);
