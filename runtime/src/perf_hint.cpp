@@ -110,10 +110,14 @@ void perf_hint_frame(int64_t ns) {
     std::lock_guard lk(g_lock);
     if (g_dirty && !g_tids.empty()) {  // a new thread made part of the frame: a session with all of them
         if (g_session) a.close(g_session);
-        // Match the ADPF target to an explicit host cap; 60 keeps the game/default 16.7 ms target.
-        const char* cap = std::getenv("NX_FPS_CAP");
-        const int fps = cap ? std::atoi(cap) : 0;
-        int64_t target = fps > 0 && fps < 60 ? (1'000'000'000ll + fps - 1) / fps : 16'666'667;
+        // The target stays at 16.7 ms whatever the host cap. With a cap (45, 30) the target used to follow it
+        // (22.2 / 33.3 ms): a frame that takes 12 ms looks like it has headroom, so the system lowers the big cores'
+        // clocks step by step until the work stretches to the target, and the game slowly drops from ~40 fps to ~25
+        // (the same frame cost then takes 1.5x as long at every stage; seen in a 2-minute log on a Galaxy A35).
+        // NX_ADPF_TARGET_FPS=<n> overrides it.
+        const char* tf = std::getenv("NX_ADPF_TARGET_FPS");
+        const int fps = tf ? std::atoi(tf) : 60;
+        int64_t target = fps > 0 && fps < 240 ? (1'000'000'000ll + fps - 1) / fps : 16'666'667;
         g_session = a.create(a.get_manager(), g_tids.data(), g_tids.size(), target);
         g_dirty = false;
         log("adpf: %s for %zu threads", g_session ? "session made" : "no session", g_tids.size());
