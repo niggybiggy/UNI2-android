@@ -33,6 +33,10 @@ void game::after_init() {
     default_setting("NX_PIPE_PREWARM_INFLIGHT", "32");
     default_setting("NX_PIPE_PREWARM_SCAN", "64");
     default_setting("NX_AFFINITY", "2");
+    // 0.4.5 bounded vertex uploads scan every index of every indexed draw on the replay thread; in the logs it trimmed
+    // 0 bindings ("bound" always equals "needed"), so it only cost CPU. 0.4.2 did not have it. NX_VERTEX_UPLOAD_RANGES=1
+    // turns it back on.
+    default_setting("NX_VERTEX_UPLOAD_RANGES", "0");
     log("p4g: experimental Android profile: pipeline prewarm 1 ms/submit, 32 in flight, 2 workers");
 #endif
 
