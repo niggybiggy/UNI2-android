@@ -26,13 +26,14 @@ void game::after_init() {
     auto default_setting = [](const char* name, const char* value) {
         if (!std::getenv(name)) setenv(name, value, 0);
     };
-    default_setting("NX_PIPE_THREADS", "3");
+    // Lighter than 0.4.5 (3 workers, 2 ms, 64 in flight, scan 128): the replay thread is the frame bottleneck.
+    default_setting("NX_PIPE_THREADS", "2");
     default_setting("NX_PIPE_PREWARM", "1");
-    default_setting("NX_PIPE_PREWARM_BUDGET_US", "2000");
-    default_setting("NX_PIPE_PREWARM_INFLIGHT", "64");
-    default_setting("NX_PIPE_PREWARM_SCAN", "128");
+    default_setting("NX_PIPE_PREWARM_BUDGET_US", "1000");
+    default_setting("NX_PIPE_PREWARM_INFLIGHT", "32");
+    default_setting("NX_PIPE_PREWARM_SCAN", "64");
     default_setting("NX_AFFINITY", "2");
-    log("p4g: experimental Android profile: pipeline prewarm 2 ms/submit, 64 in flight, 3 workers");
+    log("p4g: experimental Android profile: pipeline prewarm 1 ms/submit, 32 in flight, 2 workers");
 #endif
 
     log("p4g: runtime initialized");
