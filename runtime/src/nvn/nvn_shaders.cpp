@@ -231,6 +231,7 @@ struct Cache {
     bool resources_loaded = false;
 #ifdef NX_LOCAL_SHADERS
     std::unordered_map<std::string, uint64_t> retry_after;
+    std::unordered_map<std::string, uint32_t> failures;
 #endif
 };
 
@@ -243,7 +244,10 @@ Cache& cache() {
 
 const ShaderInfo* shader_by_hash(const std::string& hash) {
     Cache& k = cache();
-    std::lock_guard lk(k.lock);
+    // Never wait here: a first-use shader translation holds this lock for a long time (NX_LOCAL_SHADERS), and the
+    // callers (prewarm on the replay thread) treat null as "not loaded yet" and ask again later.
+    std::unique_lock lk(k.lock, std::try_to_lock);
+    if (!lk.owns_lock()) return nullptr;
     auto it = k.by_hash.find(hash);
     return it == k.by_hash.end() ? nullptr : it->second.get();
 }
@@ -275,7 +279,13 @@ const ShaderInfo* shader_for(uint64_t code_host, uint64_t control) {
 #ifdef NX_LOCAL_SHADERS
     if (auto retry = k.retry_after.find(hash);
         retry != k.retry_after.end() && plat::monotonic_ns() < retry->second) return nullptr;
-    auto retry_later = [&] { k.retry_after[hash] = plat::monotonic_ns() + 1'000'000'000; };
+    // A shader that fails is retried after 1 s, then 2, 4 ... up to 60 s: a permanent failure must not cost a
+    // translation (thread, disk, lock) every second.
+    auto retry_later = [&] {
+        uint32_t n = ++k.failures[hash];
+        uint64_t s = n >= 7 ? 60 : (1ull << (n - 1));
+        k.retry_after[hash] = plat::monotonic_ns() + s * 1'000'000'000ull;
+    };
 #else
     // With a fixed shader pack, a missing module cannot appear during gameplay.
     k.by_hash.try_emplace(hash);
@@ -353,6 +363,7 @@ if (!read_whole(dir + hash + ".spv", bytes) ||
     info->masks_known = true;
 #ifdef NX_LOCAL_SHADERS
     k.retry_after.erase(hash);
+    k.failures.erase(hash);
 #endif
     const ShaderInfo* result = info.get();
     k.by_hash.insert_or_assign(hash, std::move(info));

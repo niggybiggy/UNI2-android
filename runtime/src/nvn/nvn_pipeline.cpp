@@ -649,6 +649,11 @@ void pipeline_warm_step() {
         if (remaining) log("nvn/vk: prewarm: %zu pipelines from earlier sessions", remaining);
     }
     if (!remaining) return;
+    // Idle backoff: after a full pass over the records that started nothing (the rest wait for shaders the game has
+    // not loaded), look again only every 30 submits instead of scanning on every one.
+    static unsigned idle_skip = 0;
+    static size_t pass_progress = 0, pass_scanned = 0;
+    if (idle_skip) { idle_skip--; return; }
     // Defaults preserve the established behaviour. Game profiles and config.txt may raise
     // the bounded work during loading-heavy titles without enabling NX_ASYNC_PIPELINES
     // (which intentionally drops draws while a new pipeline is compiling).
@@ -672,9 +677,12 @@ void pipeline_warm_step() {
     // Bound each blocking batch so a large learned cache does not allocate every VkGraphicsPipelineCreateInfo at once.
     const size_t step_inflight_limit = mode == 2 ? std::max<size_t>(inflight_limit, 256) : inflight_limit;
     std::vector<std::shared_ptr<PipeTask>> aggressive_tasks;
+    // Each start builds shader modules on this thread: at most 3 per submit in background mode.
+    size_t started = 0;
     for (size_t scanned = 0; scanned < step_scan_limit && g_prewarm_inflight < step_inflight_limit; scanned++) {
-        if (mode == 1 && plat::monotonic_ns() - t0 > budget_ns) break;
+        if (mode == 1 && (plat::monotonic_ns() - t0 > budget_ns || started >= 3)) break;
         size_t i = cursor++ % recs.size();
+        pass_scanned++;
         if (done[i]) continue;
         WarmRec& r = recs[i];
         const ShaderInfo* vs = shader_by_hash(r.vs);
@@ -693,7 +701,12 @@ void pipeline_warm_step() {
         enqueue(t);
         if (mode == 2) aggressive_tasks.push_back(t);
         g_prewarm_inflight++;
+        started++, pass_progress++;
         note_pipeline_prewarmed();
+    }
+    if (mode == 1 && pass_scanned >= recs.size()) {
+        if (!pass_progress) idle_skip = 30;
+        pass_scanned = pass_progress = 0;
     }
     if (mode == 2 && !aggressive_tasks.empty()) {
         log("nvn/vk: aggressive prewarm: waiting for %zu known pipelines", aggressive_tasks.size());
