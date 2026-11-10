@@ -125,7 +125,10 @@ void place(int role, bool helper = false) {
     for (size_t k = 0; k < c.cluster.size(); ++k) {
         const int cl = c.cluster[k];
         const bool in = mode == 2 ? cl > 0 : role == 0 ? cl == top : (c.clusters > 2 ? cl > 0 && cl < top : cl == top);
-        if (in) CPU_SET(int(k), &set), ++selected;
+        if (in) {
+            CPU_SET(int(k), &set);
+            ++selected;
+        }
     }
     // Pinning everything to a few big cores starves the frame threads (2+6 phones: 2 cores for the game, the replay, 3
     // pipeline compilers and audio) and keeps Android from spilling to the little cores. Pin only with enough room:
