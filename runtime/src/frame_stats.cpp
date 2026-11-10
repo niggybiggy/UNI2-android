@@ -112,7 +112,8 @@ int affinity_mode() {
     return m;
 }
 
-void place(int role) {
+// helper: a worker/guest thread (pipeline compilers, janitor, game threads), not one of the two frame threads.
+void place(int role, bool helper = false) {
     const int mode = affinity_mode();
     if (!mode) return;
     const Cpus& c = cpus();
@@ -120,11 +121,16 @@ void place(int role) {
     cpu_set_t set;
     CPU_ZERO(&set);
     const int top = c.clusters - 1;
+    int selected = 0;
     for (size_t k = 0; k < c.cluster.size(); ++k) {
         const int cl = c.cluster[k];
         const bool in = mode == 2 ? cl > 0 : role == 0 ? cl == top : (c.clusters > 2 ? cl > 0 && cl < top : cl == top);
-        if (in) CPU_SET(int(k), &set);
+        if (in) CPU_SET(int(k), &set), ++selected;
     }
+    // Pinning everything to a few big cores starves the frame threads (2+6 phones: 2 cores for the game, the replay, 3
+    // pipeline compilers and audio) and keeps Android from spilling to the little cores. Pin only with enough room:
+    // 4+ cores for the frame threads, 6+ for helper threads; otherwise leave the scheduler alone.
+    if (selected < (helper ? 6 : 4)) return;
     if (sched_setaffinity(0, sizeof set, &set) == 0) return;
     if (mode != 2) {
         // A preferred cluster can be unavailable while the device is hot.
@@ -216,7 +222,7 @@ void request_performance_profile() {
 
 #if defined(__ANDROID__)
 void place_fast_cores() {
-    if (affinity_mode() == 2) place(0);
+    if (affinity_mode() == 2) place(0, true);
 }
 #endif
 
