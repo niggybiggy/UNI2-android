@@ -111,7 +111,9 @@ final class InstalledGameFiles {
             if (part.isEmpty() || part.equals(".") || part.equals("..")) throw new IOException("Unsafe installed file path");
         File file = new File(root, relative);
         String prefix = root.getCanonicalPath() + File.separator;
-        if (!file.getCanonicalPath().startsWith(prefix)) throw new IOException("Installed file escapes the game folder");
+        if (!file.getCanonicalPath().startsWith(prefix))  // the offending path is named: UNI2 diagnosis
+            throw new IOException("Installed file escapes the game folder: " + relative + " -> " + file.getCanonicalPath() +
+                    " (folder " + root.getCanonicalPath() + ")");
         return file;
     }
 
