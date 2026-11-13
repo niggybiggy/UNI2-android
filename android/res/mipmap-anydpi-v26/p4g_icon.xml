@@ -1,0 +1,4 @@
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/p4g_icon_background"/>
+    <foreground android:drawable="@drawable/p4g_icon_foreground"/>
+</adaptive-icon>

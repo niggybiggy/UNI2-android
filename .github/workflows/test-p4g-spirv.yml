@@ -1,0 +1,220 @@
+
+name: Test P4G GXP to SPIR-V
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-spirv:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout P4G
+        uses: actions/checkout@v4
+
+      - name: Verify GXP sample
+        run: |
+          set -e
+
+          GXP="games/p4g/tests/V00000000_00000000.gxp"
+
+          test -s "$GXP"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          path = Path(
+              "games/p4g/tests/V00000000_00000000.gxp"
+          )
+
+          data = path.read_bytes()
+
+          assert len(data) >= 12
+          assert data[:4] == b"GXP\x00"
+
+          version, size = struct.unpack_from("<II", data, 4)
+
+          assert size == len(data)
+
+          print("GXP sample validated")
+          print("Bytes:", len(data))
+          print("Version:", hex(version))
+          PY
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            xvfb \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            libgl1 \
+            libx11-6 \
+            libxext6 \
+            libxrandr2 \
+            libxkbcommon0 \
+            libasound2t64 \
+            spirv-tools
+
+      - name: Download Vita3K
+        run: |
+          set -e
+
+          mkdir -p vita3k-test
+          cd vita3k-test
+
+          curl -fL --retry 3 \
+            -o Vita3K.AppImage \
+            "https://github.com/Vita3K/Vita3K/releases/download/continuous/Vita3K-x86_64.AppImage"
+
+          test -s Vita3K.AppImage
+          chmod +x Vita3K.AppImage
+
+          # Extrai o AppImage sem depender de FUSE.
+          ./Vita3K.AppImage --appimage-extract
+
+          test -x squashfs-root/AppRun
+
+          echo "Vita3K downloaded and extracted"
+
+      - name: Run GXP recompilation
+        id: recompile
+        shell: bash
+        run: |
+          mkdir -p test-results
+
+          GXP="$GITHUB_WORKSPACE/games/p4g/tests/V00000000_00000000.gxp"
+          VITA="$GITHUB_WORKSPACE/vita3k-test/squashfs-root/AppRun"
+
+          cd test-results
+
+          echo "Testing P4G shader: $GXP"
+
+          set +e
+
+          timeout 120s xvfb-run -a \
+            "$VITA" \
+            --recompile-shader "$GXP" \
+            > vita3k.log 2>&1
+
+          EXIT_CODE=$?
+
+          set -e
+
+          echo "$EXIT_CODE" > exit-code.txt
+
+          echo "Vita3K exit code: $EXIT_CODE"
+          echo "Last log lines:"
+          tail -n 100 vita3k.log || true
+
+          # Este passo sempre termina para permitir
+          # a coleta dos logs no passo seguinte.
+
+      - name: Inspect SPIR-V output
+        shell: bash
+        run: |
+          set -e
+
+          cd test-results
+
+          echo "Searching for generated SPIR-V files"
+
+          find "$GITHUB_WORKSPACE" \
+            -type f \
+            \( -iname "*.spv" -o -iname "*.spirv" \) \
+            -not -path "*/squashfs-root/*" \
+            > generated-files.txt
+
+          cat generated-files.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = Path("generated-files.txt").read_text().splitlines()
+          valid = []
+
+          for filename in files:
+              p = Path(filename)
+
+              try:
+                  data = p.read_bytes()
+              except OSError:
+                  continue
+
+              if len(data) >= 20 and data[:4] == b"\x03\x02\x23\x07":
+                  valid.append(str(p))
+
+          Path("valid-spirv.txt").write_text(
+              "\n".join(valid) + ("\n" if valid else "")
+          )
+
+          if valid:
+              print("SPIR-V files with valid magic:")
+              for name in valid:
+                  print(name)
+          else:
+              print("No SPIR-V output detected.")
+          PY
+
+      - name: Save test summary
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p test-results
+
+          echo "P4G GXP to SPIR-V test" \
+            > test-results/summary.txt
+
+          echo "Input: V00000000_00000000.gxp" \
+            >> test-results/summary.txt
+
+          if [ -f test-results/exit-code.txt ]; then
+            echo "Vita3K exit code:" \
+              >> test-results/summary.txt
+
+            cat test-results/exit-code.txt \
+              >> test-results/summary.txt
+          fi
+
+          if [ -s test-results/valid-spirv.txt ]; then
+            echo "SPIR-V output detected." \
+              >> test-results/summary.txt
+          else
+            echo "No verified SPIR-V output." \
+              >> test-results/summary.txt
+          fi
+
+      - name: Upload diagnostic files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4g-vita3k-spirv-test
+          path: test-results/
+          if-no-files-found: warn
+
+      - name: Check test result
+        shell: bash
+        run: |
+          test -f test-results/exit-code.txt
+
+          CODE=$(cat test-results/exit-code.txt)
+
+          if [ "$CODE" != "0" ]; then
+            echo "Vita3K returned error code $CODE"
+            exit 1
+          fi
+
+          if [ ! -s test-results/valid-spirv.txt ]; then
+            echo "No SPIR-V output detected."
+            echo "Inspect the uploaded Vita3K log."
+            exit 1
+          fi
+
+          while IFS= read -r file; do
+            spirv-val "$file"
+          done < test-results/valid-spirv.txt
+
+          echo "GXP to SPIR-V test passed!"

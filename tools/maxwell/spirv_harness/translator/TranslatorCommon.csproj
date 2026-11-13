@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion>
+    <AssemblyName>Ryujinx.Common</AssemblyName><EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RyuSrc>$(MSBuildThisFileDirectory)../../../../private/third_party/ryubing/src/</RyuSrc>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(RyuSrc)Ryujinx.Common/Memory/IArray.cs" />
+    <Compile Include="$(RyuSrc)Ryujinx.Common/Memory/StructArrayHelpers.cs" />
+    <Compile Include="$(RyuSrc)Ryujinx.Common/Utilities/BitUtils.cs" />
+    <Compile Include="$(RyuSrc)Ryujinx.Common/Utilities/BitfieldExtensions.cs" />
+    <Compile Include="$(RyuSrc)Ryujinx.Common/Pools/ObjectPool.cs" />
+    <Compile Include="EmbeddedResources.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UNI2 launcher (internal id p4g), preparation process, and isolated native game process. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.p4grecomp"
+    android:versionCode="21"
+    android:versionName="0.4.6-uni2-1">
+
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <!-- Vulkan 1.1: the mid-range GPUs the port targets (Adreno 610, PowerVR BXM) have nothing newer. -->
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:enableOnBackInvokedCallback="false"
+        android:label="UNI2"
+        android:icon="@mipmap/p4g_icon"
+        android:roundIcon="@mipmap/p4g_icon"
+        android:requestLegacyExternalStorage="true"
+        android:hasCode="true"
+        android:extractNativeLibs="true"
+        android:debuggable="true"
+        android:isGame="true"
+        android:appCategory="game"
+        android:largeHeap="true"
+        android:theme="@style/Fullscreen">
+        <!-- Home screen: data check, options (config.txt), then the game. -->
+        <activity
+            android:name=".Launcher"
+            android:launchMode="singleTop"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:screenOrientation="sensorLandscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Prepares the game once: checks the player's NSP and keys and translates its shaders (libp4gimport.so with
+             libp4gshader.so, the shader translator). Its own process, so the translator's runtime never shares
+             the game's. -->
+        <activity
+            android:name=".ImportActivity"
+            android:exported="false"
+            android:process=":import"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:screenOrientation="sensorLandscape"
+            />
+        <!-- Where the on-screen controls go (NX_TOUCH_LAYOUT), full screen like the game. -->
+        <activity
+            android:name=".ControlsEditor"
+            android:exported="false"
+            android:theme="@style/Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+        <!-- Isolated game process: native shutdown leaves the launcher alive. -->
+        <activity
+            android:name=".GameActivity"
+            android:process=":game"
+            android:enableOnBackInvokedCallback="true"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density">
+            <meta-data android:name="android.app.lib_name" android:value="p4g" />
+        </activity>
+    </application>
+</manifest>

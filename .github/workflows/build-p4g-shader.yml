@@ -1,0 +1,656 @@
+
+name: Build P4G Shader ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-shader:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout P4G
+        uses: actions/checkout@v4
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;28.2.13676358'
+
+      - name: Download Vita3K
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git clone --depth 1 https://github.com/Vita3K/Vita3K.git vita3k-source
+          git -C vita3k-source rev-parse HEAD > vita3k-commit.txt
+
+      - name: Install compiler dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            libboost-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            libglm-dev \
+            spirv-tools \
+            spirv-headers \
+            ninja-build
+
+          mkdir -p build-shader/third_party
+          mkdir -p build-shader/logs
+          mkdir -p build-shader/objects
+
+          for dir in boost spdlog fmt glm spirv; do
+            if [ -d "/usr/include/$dir" ]; then
+              cp -a "/usr/include/$dir" build-shader/third_party/
+            fi
+          done
+
+      - name: Prepare Vita3K SPIR-V dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git -C vita3k-source submodule update \
+            --init \
+            external/glslang \
+            external/SPIRV-Cross
+
+          test -f vita3k-source/external/glslang/SPIRV/SpvBuilder.h
+          test -f vita3k-source/external/SPIRV-Cross/spirv_glsl.hpp
+
+          echo "Vita3K SPIR-V dependencies ready"
+
+      - name: Download SDL3
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git clone --depth 1 \
+            --branch release-3.2.0 \
+            https://github.com/libsdl-org/SDL.git \
+            build-shader/sdl3-source
+
+          test -f build-shader/sdl3-source/include/SDL3/SDL_iostream.h
+
+          echo "SDL3 source ready"
+
+      - name: Compile all Vita3K shader sources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+
+          ROOT="vita3k-source"
+          SRC="$ROOT/vita3k/shader/src"
+          OUT="build-shader"
+
+          test -x "$CXX"
+
+          printf 'source\tstatus\n' > "$OUT/results.tsv"
+
+          SOURCES=(
+            translator/alu.cpp
+            translator/ialu.cpp
+            translator/branch_cond.cpp
+            translator/data.cpp
+            translator/special.cpp
+            translator/illegal.cpp
+            translator/texture.cpp
+            translator/utils.cpp
+            gxp_parser.cpp
+            usse_disasm.cpp
+            usse_program_analyzer.cpp
+            usse_decode_helpers.cpp
+            usse_translator_entry.cpp
+            usse_utilities.cpp
+            spirv_recompiler.cpp
+          )
+
+          SUCCESS=0
+          FAILED=0
+
+          for source in "${SOURCES[@]}"; do
+            echo "::group::Compiling $source"
+
+            name="${source//\//_}"
+            name="${name%.cpp}"
+
+            object="$OUT/objects/${name}.o"
+            log="$OUT/logs/${name}.log"
+
+            args=(
+              -std=c++23
+              -include utility
+              -DSPDLOG_FMT_EXTERNAL
+              -O2
+              -fPIC
+              -I "$OUT/third_party"
+              -I "$ROOT/external/glslang"
+              -I "$ROOT/external/SPIRV-Cross"
+              -I "$ROOT/vita3k/shader/include"
+              -I "$ROOT/vita3k/util/include"
+              -I "$ROOT/vita3k/gxm/include"
+              -I "$ROOT/vita3k/features/include"
+              -c "$SRC/$source"
+              -o "$object"
+            )
+
+            if "$CXX" "${args[@]}" > "$log" 2>&1; then
+              echo "PASS: $source"
+              printf '%s\tPASS\n' "$source" >> "$OUT/results.tsv"
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "FAIL: $source"
+              printf '%s\tFAIL\n' "$source" >> "$OUT/results.tsv"
+              FAILED=$((FAILED + 1))
+              grep -m 5 -E 'fatal error:|error:' "$log" || tail -n 20 "$log"
+            fi
+
+            echo "::endgroup::"
+          done
+
+          {
+            echo "P4G Shader ARM64 Build"
+            echo "Vita3K commit:"
+            cat vita3k-commit.txt
+            echo
+            echo "Shader sources compiled: $SUCCESS"
+            echo "Shader sources failed: $FAILED"
+            echo "Total: ${#SOURCES[@]}"
+          } | tee "$OUT/summary.txt"
+
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Verify ARM64 shader objects
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="build-shader"
+
+          mapfile -t objects < <(find "$OUT/objects" -type f -name '*.o' | sort)
+
+          echo "Shader object count: ${#objects[@]}"
+
+          if [ "${#objects[@]}" -ne 15 ]; then
+            echo "Expected 15 shader object files."
+            exit 1
+          fi
+
+          file "${objects[@]}" > "$OUT/object-types.txt"
+          cat "$OUT/object-types.txt"
+
+          if grep -viq 'aarch64' "$OUT/object-types.txt"; then
+            echo "Unexpected object architecture."
+            exit 1
+          fi
+
+          echo "All shader objects are ARM64."
+
+      - name: Compile glslang SPIR-V Builder
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+
+          SRC="vita3k-source/external/glslang"
+          OUT="build-shader"
+
+          args=(
+            -std=c++23
+            -O2
+            -fPIC
+            -I "$SRC"
+            -I "$SRC/SPIRV"
+            -c "$SRC/SPIRV/SpvBuilder.cpp"
+            -o "$OUT/objects/glslang_spv_builder.o"
+          )
+
+          if ! "$CXX" "${args[@]}" > "$OUT/logs/glslang_builder.log" 2>&1; then
+            cat "$OUT/logs/glslang_builder.log"
+            exit 1
+          fi
+
+          file "$OUT/objects/glslang_spv_builder.o"
+
+      - name: Compile remaining shader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+
+          ROOT="vita3k-source"
+          OUT="build-shader"
+
+          printf 'source\tstatus\n' > "$OUT/dependency-results.tsv"
+
+          SOURCES=(
+            external/glslang/SPIRV/InReadableOrder.cpp
+            external/glslang/SPIRV/Logger.cpp
+            external/glslang/SPIRV/SpvTools.cpp
+            external/glslang/SPIRV/disassemble.cpp
+            external/SPIRV-Cross/spirv_cross.cpp
+            external/SPIRV-Cross/spirv_parser.cpp
+            external/SPIRV-Cross/spirv_glsl.cpp
+            external/SPIRV-Cross/spirv_cfg.cpp
+            external/SPIRV-Cross/spirv_cross_parsed_ir.cpp
+            external/SPIRV-Cross/spirv_cross_util.cpp
+            gxm/src/gxp.cpp
+            gxm/src/color.cpp
+            gxm/src/textures.cpp
+            util/src/string_utils.cpp
+            util/src/fs_utils.cpp
+          )
+
+          SUCCESS=0
+          FAILED=0
+
+          for source in "${SOURCES[@]}"; do
+            echo "::group::Compiling $source"
+
+            name="${source//\//_}"
+            name="${name%.cpp}"
+
+            log="$OUT/logs/dependency_${name}.log"
+            object="$OUT/objects/dependency_${name}.o"
+
+            if [[ "$source" == external/* ]]; then
+              input="$ROOT/$source"
+            else
+              input="$ROOT/vita3k/$source"
+            fi
+
+            args=(
+              -std=c++23
+              -include utility
+              -DSPDLOG_FMT_EXTERNAL
+              -DFMT_HEADER_ONLY
+              -O2
+              -fPIC
+              -I "$OUT/third_party"
+              -I "$OUT/sdl3-source/include"
+              -I "$ROOT/external/glslang"
+              -I "$ROOT/external/SPIRV-Cross"
+              -I "$ROOT/vita3k/shader/include"
+              -I "$ROOT/vita3k/util/include"
+              -I "$ROOT/vita3k/gxm/include"
+              -I "$ROOT/vita3k/features/include"
+              -c "$input"
+              -o "$object"
+            )
+
+            if "$CXX" "${args[@]}" > "$log" 2>&1; then
+              echo "PASS: $source"
+              printf '%s\tPASS\n' "$source" >> "$OUT/dependency-results.tsv"
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "FAIL: $source"
+              printf '%s\tFAIL\n' "$source" >> "$OUT/dependency-results.tsv"
+              FAILED=$((FAILED + 1))
+              grep -m 5 -E 'fatal error:|error:' "$log" || tail -n 20 "$log"
+            fi
+
+            echo "::endgroup::"
+          done
+
+          echo "Dependencies compiled: $SUCCESS"
+          echo "Dependencies failed: $FAILED"
+          cat "$OUT/dependency-results.tsv"
+
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build final SPIR-V and SDL3 dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          CXX="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
+
+          OUT="build-shader"
+          GLSLANG="vita3k-source/external/glslang"
+          SDL="$OUT/sdl3-source"
+
+          echo "Compiling SPIR-V instruction definitions..."
+
+          test -f "$GLSLANG/SPIRV/doc.cpp"
+
+          args=(
+            -std=c++23
+            -O2
+            -fPIC
+            -I "$GLSLANG"
+            -c "$GLSLANG/SPIRV/doc.cpp"
+            -o "$OUT/objects/glslang_doc.o"
+          )
+
+          if ! "$CXX" "${args[@]}" > "$OUT/logs/glslang_doc.log" 2>&1; then
+            cat "$OUT/logs/glslang_doc.log"
+            exit 1
+          fi
+
+          echo "Building SDL3 for Android ARM64..."
+
+          cmake -S "$SDL" \
+            -B "$OUT/sdl3-build" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DSDL_SHARED=OFF \
+            -DSDL_STATIC=ON \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            > "$OUT/logs/sdl3-configure.log" 2>&1 || {
+              tail -n 100 "$OUT/logs/sdl3-configure.log"
+              exit 1
+            }
+
+          cmake --build "$OUT/sdl3-build" \
+            --parallel 4 \
+            > "$OUT/logs/sdl3-build.log" 2>&1 || {
+              tail -n 100 "$OUT/logs/sdl3-build.log"
+              exit 1
+            }
+
+          SDL_LIB=$(find "$OUT/sdl3-build" \
+            -type f -name 'libSDL3.a' \
+            -print -quit)
+
+          test -n "$SDL_LIB"
+          test -s "$SDL_LIB"
+
+          echo "SDL_LIB=$SDL_LIB" >> "$GITHUB_ENV"
+
+          echo "SPIR-V definitions compiled."
+          echo "SDL3 ARM64 static library built."
+          echo "SDL3 library: $SDL_LIB"
+
+
+      - name: Build P4G shader C interface
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="build-shader"
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+
+          cat > "$OUT/p4g_shader_api.cpp" <<'EOF'
+          #include <shader/spirv_recompiler.h>
+          #include <features/state.h>
+          #include <gxm/types.h>
+
+          #include <algorithm>
+          #include <cstddef>
+          #include <cstdint>
+          #include <cstdio>
+          #include <cstring>
+          #include <exception>
+          #include <string>
+          #include <vector>
+
+          // Vita3K-derived GXP -> Vulkan SPIR-V ABI.
+          // GPL-2.0-or-later: retain Vita3K notices and sources.
+          // Return: 0=written, -1=args, -2=invalid header,
+          //         -3=translation failed, -4=invalid SPIR-V,
+          //         -5=write failure.
+          extern "C" int p4g_shader_api_version() {
+              return 2;
+          }
+
+          extern "C" int p4g_shader_convert(
+              const void* gxp_data,
+              size_t gxp_size,
+              const char* output_path
+          ) {
+              if (!gxp_data || !output_path || !*output_path)
+                  return -1;
+
+              if (gxp_size < sizeof(SceGxmProgram) ||
+                  gxp_size > 32u * 1024u * 1024u)
+                  return -2;
+
+              // Check header before interpreting any program fields.
+              // GXP size can omit trailing alignment/padding bytes.
+              uint32_t magic = 0;
+              uint32_t declared_size = 0;
+              std::memcpy(&magic, gxp_data, sizeof(magic));
+              std::memcpy(&declared_size,
+                          static_cast<const uint8_t*>(gxp_data) + 8,
+                          sizeof(declared_size));
+
+              if (magic != 0x00505847u ||
+                  declared_size < sizeof(SceGxmProgram) ||
+                  declared_size > gxp_size)
+                  return -2;
+
+              // An aligned copy avoids unaligned struct access.
+              std::vector<uint32_t> aligned((gxp_size + 3) / 4, 0);
+              std::memcpy(aligned.data(), gxp_data, gxp_size);
+
+              try {
+                  const auto& program =
+                      *reinterpret_cast<const SceGxmProgram*>(aligned.data());
+
+                  FeatureState features{};
+                  features.spirv_shader = true;
+
+                  shader::Hints hints{};
+                  hints.attributes = nullptr;
+                  hints.color_format =
+                      SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR;
+
+                  std::fill_n(hints.vertex_textures,
+                      SCE_GXM_MAX_TEXTURE_UNITS,
+                      SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR);
+                  std::fill_n(hints.fragment_textures,
+                      SCE_GXM_MAX_TEXTURE_UNITS,
+                      SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR);
+
+                  const auto generated = shader::convert_gxp(
+                      program,
+                      "p4g_android",
+                      features,
+                      shader::Target::SpirVVulkan,
+                      hints
+                  );
+
+                  const auto& spirv = generated.spirv;
+                  if (spirv.size() < 5 ||
+                      spirv[0] != 0x07230203u ||
+                      spirv[3] == 0)
+                      return -4;
+
+                  FILE* output = std::fopen(output_path, "wb");
+                  if (!output)
+                      return -5;
+
+                  const size_t written = std::fwrite(
+                      spirv.data(), sizeof(uint32_t), spirv.size(), output);
+                  const int close_result = std::fclose(output);
+                  if (written != spirv.size() || close_result != 0) {
+                      std::remove(output_path);
+                      return -5;
+                  }
+                  return 0;
+              } catch (const std::exception&) {
+                  return -3;
+              } catch (...) {
+                  return -3;
+              }
+          }
+          EOF
+          "$CXX" \
+            -std=c++23 \
+            -fexceptions \
+            -O2 \
+            -fPIC \
+            -I vita3k-source/vita3k/shader/include \
+            -I vita3k-source/vita3k/gxm/include \
+            -I vita3k-source/vita3k/features/include \
+            -I vita3k-source/vita3k/util/include \
+            -I vita3k-source/external/glslang \
+            -I vita3k-source/external/SPIRV-Cross \
+            -I "$OUT/third_party" \
+            -c "$OUT/p4g_shader_api.cpp" \
+            -o "$OUT/objects/p4g_shader_api.o" \
+            > "$OUT/logs/p4g_shader_api.log" 2>&1 || {
+              cat "$OUT/logs/p4g_shader_api.log"
+              exit 1
+            }
+
+          echo "P4G C interface v2 compiled."
+
+
+      - name: Link Vita3K shader library
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          CXX="$TOOLCHAIN/aarch64-linux-android29-clang++"
+          NM="$TOOLCHAIN/llvm-nm"
+          READELF="$TOOLCHAIN/llvm-readelf"
+
+          OUT="build-shader"
+          LIB="$OUT/libp4gshader.so"
+
+          mkdir -p "$OUT/logs"
+
+          echo "Collecting unresolved symbols..."
+
+          "$NM" -C -u "$OUT"/objects/*.o \
+            > "$OUT/logs/undefined-symbols.txt" 2>&1 || true
+
+          test -n "${SDL_LIB:-}"
+          test -s "$SDL_LIB"
+
+          objects=( "$OUT"/objects/*.o )
+
+          echo "ARM64 object count: ${#objects[@]}"
+          echo "SDL3 library: $SDL_LIB"
+
+          args=(
+            -shared
+            -Wl,--no-undefined
+            -Wl,--error-limit=0
+            -Wl,-z,max-page-size=16384
+            -o "$LIB"
+            "${objects[@]}"
+            "$SDL_LIB"
+            -lGLESv2
+            -lOpenSLES
+            -llog
+            -ldl
+            -landroid
+          )
+
+          echo "Attempting strict Android ARM64 linking..."
+
+          if "$CXX" "${args[@]}" > "$OUT/logs/link.log" 2>&1; then
+            echo "0" > "$OUT/logs/link-exit-code.txt"
+          else
+            rc=$?
+            echo "$rc" > "$OUT/logs/link-exit-code.txt"
+            echo "Link failed:"
+            tail -n 100 "$OUT/logs/link.log"
+            exit "$rc"
+          fi
+
+          test -s "$LIB"
+
+          "$READELF" -h "$LIB" > "$OUT/logs/library-elf.txt"
+          "$READELF" -d "$LIB" > "$OUT/logs/library-dependencies.txt"
+          "$NM" -D --defined-only "$LIB" > "$OUT/logs/exported-symbols.txt"
+
+          file "$LIB"
+          echo "libp4gshader.so linked successfully."
+
+      - name: Verify shader library
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          READELF="$TOOLCHAIN/llvm-readelf"
+
+          LIB="build-shader/libp4gshader.so"
+
+          test -s "$LIB"
+
+          "$READELF" -h "$LIB" | grep -q AArch64
+
+          echo "Android ARM64 ELF verified."
+          echo "Library size:"
+          ls -lh "$LIB"
+
+          echo "Dependencies:"
+          "$READELF" -d "$LIB" | grep NEEDED || true
+
+          NM="$TOOLCHAIN/llvm-nm"
+          "$NM" -D --defined-only "$LIB" | grep -Eq '[[:space:]]p4g_shader_api_version$'
+          "$NM" -D --defined-only "$LIB" | grep -Eq '[[:space:]]p4g_shader_convert$'
+
+          echo "ARM64 shader C API v2 symbols verified."
+          echo "Runtime GXP conversion still needs Android integration."
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4g-shader-arm64-link-diagnostics
+          path: |
+            build-shader/summary.txt
+            build-shader/results.tsv
+            build-shader/dependency-results.tsv
+            build-shader/logs/
+            build-shader/object-types.txt
+            build-shader/libp4gshader.so
+            build-shader/p4g_shader_api.cpp
+            vita3k-commit.txt
+          if-no-files-found: warn
+
+      - name: Check final result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if grep -q $'\tFAIL' build-shader/results.tsv; then
+            echo "Shader compilation failed."
+            exit 1
+          fi
+
+          if grep -q $'\tFAIL' build-shader/dependency-results.tsv; then
+            echo "Dependency compilation failed."
+            exit 1
+          fi
+
+          test -s build-shader/libp4gshader.so
+
+          echo "All shader sources compiled."
+          echo "All selected dependencies compiled."
+          echo "Android ARM64 shared library linked."
+          echo "Next: GXP translation API and APK integration."
