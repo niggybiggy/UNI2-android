@@ -228,7 +228,8 @@ void boot() {
             std::snprintf(hex, sizeof(hex), "%02X", b);
             have += hex;
         }
-        const bool configured = game::kInfo.main_build_id &&
+        // A null main_build_id means "any version" (see nx/game.h); UNI2 leaves it null on purpose.
+        const bool configured = !game::kInfo.main_build_id ||
                 have.rfind(game::kInfo.main_build_id, 0) == 0;
         const bool p4g_update = std::strcmp(game::kInfo.id, "p4g") == 0 &&
                 have.rfind("66B2B6D53549A6364A43F69E282E3882", 0) == 0;
