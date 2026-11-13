@@ -110,10 +110,13 @@ final class InstalledGameFiles {
         for (String part : relative.split("/", -1))
             if (part.isEmpty() || part.equals(".") || part.equals("..")) throw new IOException("Unsafe installed file path");
         File file = new File(root, relative);
-        String prefix = root.getCanonicalPath() + File.separator;
-        if (!file.getCanonicalPath().startsWith(prefix))  // the offending path is named: UNI2 diagnosis
-            throw new IOException("Installed file escapes the game folder: " + relative + " -> " + file.getCanonicalPath() +
-                    " (folder " + root.getCanonicalPath() + ")");
+        // Every part of `relative` was checked above (no empty, "." or ".." part, no backslash), so a plain lexical
+        // check is enough to stay inside the folder. The canonical path is not compared: on Android's FUSE storage it
+        // intermittently came back different for the same file ("escapes the game folder" with identical paths).
+        java.nio.file.Path base = root.toPath().toAbsolutePath().normalize();
+        java.nio.file.Path target = file.toPath().toAbsolutePath().normalize();
+        if (!target.startsWith(base) || java.nio.file.Files.isSymbolicLink(file.toPath()))
+            throw new IOException("Installed file escapes the game folder: " + relative);
         return file;
     }
 
