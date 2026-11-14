@@ -189,10 +189,14 @@ void boot() {
     std::vector<std::string> mod_names = {"main", "sdk"};
     for (int k = 0; k <= 9; k++) mod_names.push_back("subsdk" + std::to_string(k));
 
+    // Modules are laid out by their real mapped size (code + data + bss), not at a fixed stride: UNI2's main maps
+    // about 0x29ce0000 bytes, which used to swallow sdk (loaded 0x20000000 after it) and its stub pool.
+    uint64_t next_base = kModuleBase;
     for (const auto& name : mod_names) {
         std::string mod_file = find_mod_exefs(name);
         std::string error;
-        const uint64_t base = kModuleBase + uint64_t(nso.size()) * 0x20000000;
+        const uint64_t base = next_base;
+        const size_t loaded_before = nso.size();
         if (!mod_file.empty()) {
             log("nce: loading mod exefs override: %s", mod_file.c_str());
             auto m = nce::load_nso(mod_file, name, base, error);
@@ -214,6 +218,12 @@ void boot() {
             } else if (name == "main" || name == "sdk") {
                 fatal("exefs/%s not found (copy the exefs folder of your own dump there)", name.c_str());
             }
+        }
+        if (nso.size() > loaded_before) {
+            const auto& mi = nso.back()->info;
+            const uint64_t span = ((mi.bss + mi.bss_size) + 0xFFF) & ~0xFFFull;
+            // Leave room for the stub pools after the module, then align to 256 MiB.
+            next_base = (base + span + 0x1000000ull + 0x0FFFFFFFull) & ~0x0FFFFFFFull;
         }
     }
     if (nso.size() < 2) fatal("failed to load base modules (main and sdk required)");
