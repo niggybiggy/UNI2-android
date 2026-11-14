@@ -442,6 +442,18 @@ void GetEntryType(CPU& c) {  // (DirectoryEntryType* out, path)
 void OpenFile(CPU& c) {  // (FileHandle* out, path, int mode: 1 read, 2 write, 4 append)
     std::lock_guard lk(g_fs);
     std::string guest = cstr(c.x[1]);
+    // A game without a movie decoder (NX_SKIP_MOVIES=1) sees its .mp4 files as missing, whatever the source: the game
+    // image, a mod, or an extracted romfs folder. The game then skips the movie instead of crashing on an empty decoder.
+    {
+        static const bool skip_movies_any = std::getenv("NX_SKIP_MOVIES") && std::getenv("NX_SKIP_MOVIES")[0] == '1';
+        const size_t n = guest.size();
+        if (skip_movies_any && n > 4 && (guest[n - 4] == '.') && (guest[n - 3] | 0x20) == 'm' &&
+            (guest[n - 2] | 0x20) == 'p' && guest[n - 1] == '4') {
+            note_open("OpenFile", guest, "hidden (movies are skipped)");
+            c.x[0] = kPathNotFound;
+            return;
+        }
+    }
     fs::path p = resolve(guest);
     int mode = int(c.x[2]);
     if (const std::string* v = find_virtual(p)) {  // served from memory, through a temporary file
