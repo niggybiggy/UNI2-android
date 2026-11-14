@@ -105,6 +105,10 @@ void game::after_init() {
     default_setting("NX_PIPE_PREWARM_INFLIGHT", "32");
     default_setting("NX_PIPE_PREWARM_SCAN", "64");
     default_setting("NX_AFFINITY", "2");
+    // UNI2's battles put 90..180 MB into the upload ring in a single submit (log: "upload buffer full (180669312
+    // bytes in this submit)"), far over the P4G profile's 64 MB. A full ring wraps over the submit's own earlier data,
+    // which drops sprites (the characters). 256 MB holds a whole submit; NX_UPLOAD_RING_MB in config.txt overrides it.
+    default_setting("NX_UPLOAD_RING_MB", "256");
     default_setting("NX_VERTEX_UPLOAD_RANGES", "0");
 #endif
     log("uni2: build 10 (on the P4G runtime)");  // tells which build a log came from
