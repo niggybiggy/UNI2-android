@@ -623,9 +623,10 @@ void load_modules(
         }
 
         log(
-            "loaded %s at %llx (%llu functions, %llu relocs)",
+            "loaded %s at %llx, mapped size %llx (%llu functions, %llu relocs)",
             mi->name,
             (unsigned long long)mi->base,
+            (unsigned long long)size,
             (unsigned long long)mi->func_count,
             (unsigned long long)mi->reloc_count
         );

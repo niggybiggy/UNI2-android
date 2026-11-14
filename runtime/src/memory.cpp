@@ -24,7 +24,7 @@ void reserve(uint64_t addr, uint64_t size, const char* what) {
 }  // namespace
 
 void memory_init() {
-    reserve(kModuleBase, 0xC0000000ull, "modules");
+    reserve(kModuleBase, 0x100000000ull, "modules");
     reserve(kHeapBase, kHeapMax, "heap");
     reserve(kAliasBase, kAliasSize, "alias");
     reserve(kStackBase, kStackSize, "stack");

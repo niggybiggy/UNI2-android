@@ -1,4 +1,5 @@
 // Native code execution: see nce.h.
+#include <cerrno>
 #include "nce.h"
 
 #include <sys/mman.h>
@@ -592,11 +593,38 @@ void prepare_module(const LoadedModule& m) {
 
     // Keep a pool after the module for late code and add one before it for early code.
     // A single pool at the end fails once a large NSO exceeds the +/-128 MiB B range.
+    // The first free, committable slot at or after the module's end wins: a slot another module or pool already
+    // covers (or one the system refuses to commit) is skipped instead of being fatal.
+    auto slot_free = [&](uint64_t a) {
+        for (uint64_t p = a; p < a + kRegionSize; p += 0x10000)
+            if (module_at(p)) return false;
+        for (const auto& [module_base, pools] : g_regions)
+            for (const Region& pool : pools)
+                if (a < pool.end && a + kRegionSize > pool.base) return false;
+        return true;
+    };
     Region end_region;
-    end_region.base = end_region.cur = m.base + ((m.size + 0xFFFF) & ~uint64_t(0xFFFF));
-    end_region.end = end_region.base + kRegionSize;
-    if (module_at(end_region.base) || module_at(end_region.end - 1) || !commit(end_region.base, kRegionSize))
-        fatal("nce: no room for %s's end stub pool at %llx", mi->name, (unsigned long long)end_region.base);
+    bool end_ok = false;
+    const uint64_t end_first = m.base + ((m.size + 0xFFFF) & ~uint64_t(0xFFFF));
+    for (uint64_t i = 0; i < 64 && !end_ok; i++) {
+        const uint64_t a = end_first + i * kRegionSize;
+        if (!slot_free(a)) {
+            if (i == 0) log("nce: %s end stub pool slot %llx is covered by %s", mi->name, (unsigned long long)a,
+                            module_at(a) ? module_at(a)->info->name : "another pool");
+            continue;
+        }
+        errno = 0;
+        if (!commit(a, kRegionSize)) {
+            log("nce: %s end stub pool at %llx: commit failed (errno %d)", mi->name, (unsigned long long)a, errno);
+            continue;
+        }
+        end_region.base = end_region.cur = a;
+        end_region.end = a + kRegionSize;
+        end_ok = true;
+    }
+    if (!end_ok)
+        fatal("nce: no room for %s's end stub pool at %llx (module size %llx)", mi->name,
+              (unsigned long long)end_first, (unsigned long long)m.size);
     end_region.copy_common();
     regions.push_back(end_region);
 
